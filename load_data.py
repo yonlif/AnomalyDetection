@@ -2,21 +2,15 @@ import datetime
 
 import pandas as pd
 import numpy as np
+import datetime as dt
 from sklearn import preprocessing
+from sklearn.utils.validation import _assert_all_finite
 from pathlib import Path
 
 
 data_dir = Path("data")
 csv_file = data_dir / "clear_nyc_taxi_data.csv"
 chunk_size = 100
-
-# Read one chunks to initialize the scale
-data = pd.read_csv(csv_file, nrows=chunk_size)
-data['pickup_datetime'] = pd.to_datetime(data['pickup_datetime'], format='%Y-%m-%d %H:%M:%S').astype(int)
-data['dropoff_datetime'] = pd.to_datetime(data['dropoff_datetime'], format='%Y-%m-%d %H:%M:%S').astype(int)
-
-min_max_scalar = preprocessing.MinMaxScaler()
-norm_data = min_max_scalar.fit_transform(data)
 
 
 def data_in_chunks(norm=False):
@@ -26,10 +20,7 @@ def data_in_chunks(norm=False):
         if tmp.empty:
             break
 
-        tmp['pickup_datetime'] = pd.to_datetime(tmp['pickup_datetime'], format='%Y-%m-%d %H:%M:%S').astype(int)
-        tmp['dropoff_datetime'] = pd.to_datetime(tmp['dropoff_datetime'], format='%Y-%m-%d %H:%M:%S').astype(int)
-        if norm:
-            tmp = min_max_scalar.fit_transform(tmp.values)
+        tmp = format_data(tmp, norm=norm)
 
         i += chunk_size
         yield tmp
@@ -45,16 +36,12 @@ def sliding_window(norm=False):
         break
     """
     i = chunk_size
-    ret = data_in_chunks(norm=norm).__next__()
+    ret = next(data_in_chunks(norm=norm))
     while True:
         tmp = pd.read_csv(csv_file, names=ret.columns, skiprows=i+1, nrows=1)
         if tmp.empty:
             break
-
-        tmp['pickup_datetime'] = pd.to_datetime(tmp['pickup_datetime'], format='%Y-%m-%d %H:%M:%S').astype(int)
-        tmp['dropoff_datetime'] = pd.to_datetime(tmp['dropoff_datetime'], format='%Y-%m-%d %H:%M:%S').astype(int)
-        if norm:
-            tmp = min_max_scalar.fit_transform(tmp.values)
+        tmp = format_data(tmp, norm=norm)
 
         ret = pd.concat([ret, tmp], ignore_index=True)
         i += 1
@@ -62,8 +49,39 @@ def sliding_window(norm=False):
         ret = ret.drop([0])
 
 
+def data_generator(start_from=0, norm=False):
+    i = start_from + 1
+    ret = format_data(pd.read_csv(csv_file,names=data.columns, skiprows=i, nrows=1), norm=norm)
+    while True:
+        if not np.isnan(ret).any():
+            yield ret
+        else:
+            print(f"falied to read line: {i}")
+        tmp = pd.read_csv(csv_file, names=data.columns, skiprows=i+1, nrows=1)
+        if tmp.empty:
+            break
+        ret = format_data(tmp, norm=norm)
+        i += 1
+
+
+def format_data(items, norm=False):
+    # Adding 2 hours to date for some reason
+    items.drop(['Unnamed: 0'], axis=1, inplace=True, errors='ignore')
+    items['pickup_datetime'] = pd.to_datetime(items['pickup_datetime']).map(lambda x: x.timestamp())
+    items['dropoff_datetime'] = pd.to_datetime(items['dropoff_datetime']).map(lambda x: x.timestamp())
+    if norm:
+        items = min_max_scalar.transform(items.values)
+    return items
+
+
 def reformat(item):
-    # Not working
-    item['pickup_datetime'] = datetime.datetime.fromtimestamp(item['pickup_datetime'] // 1000)
-    item['dropoff_datetime'] = datetime.datetime.fromtimestamp(item['dropoff_datetime'] // 1000)
+    item['pickup_datetime'] = item['pickup_datetime'].map(lambda x: dt.datetime.fromtimestamp(x))
+    item['dropoff_datetime'] = item['dropoff_datetime'].map(lambda x: dt.datetime.fromtimestamp(x))
     return item
+
+
+# Read one chunks to initialize the scale
+data = pd.read_csv(csv_file, nrows=chunk_size)
+data = format_data(data)
+min_max_scalar = preprocessing.MinMaxScaler()
+norm_data = min_max_scalar.fit_transform(data)

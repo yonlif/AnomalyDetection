@@ -33,3 +33,5 @@ for item in smallest:
     print()
     print(f"Score: {item[0]}")
     print(item[1])
+
+# Next: use partial_fit in order to iterate over all the data and update the model as we go
